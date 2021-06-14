@@ -14,7 +14,7 @@ class SsiTest(unittest.TestCase):
 
     def test_random(self):
 
-        f_e, ms_e, zeta_e = ssi_cov(self.acc_random, self.fs)
+        f_e, ms_e, zeta_e = ssi_cov(self.acc_random, self.fs)  # a longer time window might increase accuracy for zeta
         assert_modal_identification(self, 'Test random with ssi-cov', f_e, ms_e, zeta_e)
 
 
