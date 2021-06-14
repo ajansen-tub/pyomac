@@ -1,7 +1,7 @@
 import numpy as np
 from statespace_model import solver
 from scipy.spatial.distance import cdist
-from pyoma.misc import mac_value, err_rel
+from pyomac.misc import mac_value, err_rel
 
 
 def generate_impulse_data(m, k, c_damp):

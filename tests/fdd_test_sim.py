@@ -1,6 +1,6 @@
 import unittest
 
-from pyoma import fdd, peak_picking
+from pyomac import fdd, peak_picking
 
 from statespace_model import get_model
 from simulation import generate_impulse_data, generate_random_data, assert_modal_identification

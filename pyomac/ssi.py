@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.spatial.distance import cdist
 from scipy.cluster.hierarchy import linkage, fcluster
-from pyoma.misc import mac_value, err_rel
+from pyomac.misc import mac_value, err_rel
 
 
 def ssi_cov(data: np.ndarray, fs: float, ts: float = 5., eps_fn: float = 0.02, eps_zeta: float = 0.05,

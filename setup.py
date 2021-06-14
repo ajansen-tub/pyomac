@@ -3,8 +3,8 @@ from distutils.core import setup
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
-setup(name='pyoma',
-      packages=['pyoma'],
+setup(name='pyomac',
+      packages=['pyomac'],
       version='0.1',
       license='MIT',
       author='Andreas Jansen, Patrick Simon',
@@ -12,8 +12,8 @@ setup(name='pyoma',
       description='Tools for Operational Modal Analysis (OMA)',
       long_description=long_description,
       long_description_content_type="text/markdown",
-      url='https://github.com/ajansen-tub/pyoma',
-      download_url='https://github.com/ajansen-tub/pyoma/v_01.tar.gz',
+      url='https://github.com/ajansen-tub/pyomac',
+      download_url='https://github.com/ajansen-tub/pyomac/v_01.tar.gz',
       keywords=['Operational Modal Analysis', 'Structural Dynamics', 'Frequency Domain Decomposition',
                 'Stochastic Subspace Identification'],
       install_requires=[

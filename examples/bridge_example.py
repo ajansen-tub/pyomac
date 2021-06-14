@@ -1,14 +1,14 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from pyoma import fdd, peak_picking, ssi_cov
-from pyoma.plot import ssi_stability_plot, fdd_peak_picking_plot
+from pyomac import fdd, peak_picking, ssi_cov
+from pyomac.plot import ssi_stability_plot, fdd_peak_picking_plot
 
 
 def main():
 
-    method = 'ssi'  # 'ssi' or 'fdd'
+    method = 'fdd'  # 'ssi' or 'fdd'
 
-    with open('sample_small.csv') as csv_file:
+    with open('sample.csv') as csv_file:
         data = np.loadtxt(csv_file, skiprows=1, delimiter=',')
 
     fs = 100  # sampling frequency [Hz]
