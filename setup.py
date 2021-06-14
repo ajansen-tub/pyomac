@@ -24,8 +24,8 @@ setup(name='pyoma',
       ],
       classifiers=[
           'Development Status :: 3 - Alpha',
-          'Intended Audience :: Structural Engineers',  # Define that your audience are developers
-          'Topic :: Operational Modal Analysis',
+          'Intended Audience :: Science/Research',
+          'Topic :: Scientific/Engineering',
           'License :: OSI Approved :: MIT License',
           'Programming Language :: Python :: 3.6',
           'Programming Language :: Python :: 3.7',
