@@ -1,3 +1,5 @@
+# These packages are required by `pyomac` in order to work.
+# TODO: fix the versions.
 numpy
 scipy
 PeakUtils
