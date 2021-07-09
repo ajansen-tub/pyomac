@@ -3,7 +3,43 @@ from scipy import signal
 from peakutils import indexes
 
 
-def fdd(data, fs: float, method: str = 'welch', nperseg: int = 2 ** 12, fmax: int = 20):  # zum Beispiel
+def fdd(data, fs: float, method: str = 'welch', nperseg: int = 2 ** 12, fmax: float = 20):  # zum Beispiel
+    """
+    Compute Frequency Domain Decomposition (FDD)
+
+    Parameters
+    ----------
+    data : array_like
+        Time series of measurement values
+    fs : float
+        Sampling frequency [Hz] of the `data` time series
+    method : str, optional
+        Determines which method is used to calculate the Cross Power Spectral Density (CPSD) matrix, either 'welch' or
+        'direct'. Defaults to 'welch'
+    nperseg : int, optional
+        Length of each segment when calculating the CPSD using the Welch-Method. Defaults to 2**12
+    fmax : float, optional
+        Maximum frequency [Hz] for which singular value decomposition is obtained. Defaults to 20 Hz
+
+
+    Returns
+    -------
+    fn : ndarray
+        Identified natural frequencies [Hz]
+    zeta : ndarray
+        Identified modal damping [-]
+
+
+    See Also
+    --------
+    pyomac.fdd.fdd_welch : Similar function in SciPy.
+
+
+    References
+    ----------
+    .. [1] Brincker, R., Zhang, L., & Andersen, P. (2001). Modal identification of output-only systems using frequency domain decomposition. Smart materials and structures, 10(3), 441.
+
+    """
 
     if method == 'welch':
         f, s, u = fdd_welch(data, fs, nperseg, fmax)
@@ -36,6 +72,7 @@ def fdd_welch(data, fs, nperseg=2**12, fmax=20):
     s = np.zeros((n_fmax, n_ch))
     u = np.zeros((n_fmax, n_ch, n_ch), dtype=complex)
 
+    # TODO: SVD can be unified with fdd_direct
     for i in range(n_fmax):  # SVD of PSD matrix
         u[i, :, :], s[i], _ = np.linalg.svd(np.squeeze(g_xx[i, :, :]))
 
