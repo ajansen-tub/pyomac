@@ -1,0 +1,6 @@
+# These packages are needed for building the documentation locally:
+docutils<0.17
+sphinx==4.0.3
+sphinx-rtd-theme==0.5.2
+jupyter==1.0.0
+rstcheck==3.3.1

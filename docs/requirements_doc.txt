@@ -1,0 +1,5 @@
+# these packages are needed for importing `pyomac`, which is needed for the continuous build of pyomac.readthedocs.org.
+numpy==1.21.0
+PeakUtils==1.3.3
+scipy==1.7.0
+matplotlib==3.4.2
