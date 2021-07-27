@@ -4,3 +4,4 @@ numpy
 scipy
 PeakUtils
 matplotlib
+pyvista==0.31.3
