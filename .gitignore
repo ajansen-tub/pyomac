@@ -6,5 +6,5 @@ pyomac/.mypy_cache/*
 .vscode/*
 *.code-workspace
 py_oma-env/*
-pyoma.egg-info/*
+pyomac.egg-info/*
 docs/build/*
