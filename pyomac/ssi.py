@@ -277,7 +277,6 @@ def _covariance_matrix(data: np.ndarray, n_block_rows: int) -> np.ndarray:
     np.ndarray
         [description]
     """
-
     # 0. sanity checks
     n_samples = data.shape[0]
     n_channels = data.shape[1]
@@ -489,7 +488,7 @@ def ssi_cov_model_order_participation(
     n_block_rows: int,
     max_model_order: int,
 ) -> np.ndarray:
-    """Determine the cumulative participations of the model orders. 
+    """Determine the cumulative participations of the model orders.
 
     Parameters
     ----------
@@ -514,7 +513,6 @@ def ssi_cov_model_order_participation(
     assert type(data) == np.ndarray, "numpy array expected"
     assert n_channels < n_samples, "expected more samples than channels"
     assert n_block_rows >= max_model_order, "n_block_rows must be greater or equal than maxmodel_order"
-    dt = 1 / fs
 
     # 1. build covariance matrices from data
     R = _covariance_matrix(data, n_block_rows)
@@ -612,17 +610,3 @@ def filter_ssi_single_order(
 
     # 4. return all conditions applied
     return filter_pairwise & filter_positive_damping & filter_max_damping
-
-
-    # def plotStabilizationDiagram(freq: list):
-    #     nmodel_orders = len(freq)
-    #     with plt.style.context(['seaborn-whitegrid', 'seaborn-talk']):
-    #         fig, ax = plt.subplots(figsize=(15, 6))
-    #         for i_order in range(0, nmodel_orders):
-    #             ax.plot(freq[i_order], [i_order] *
-    #                     len(freq[i_order]), 'o', color='C1')
-    #         ax.set(xlabel='Frequency [Hz]', ylabel='Model order')
-    #         ax.set(xlim=[0, 800])
-    #         ax.set_yticks([])
-    #         fig.suptitle('Stabilization diagram', fontsize=20)
-    #     return fig, ax
