@@ -40,6 +40,7 @@ Install pyomac by running:
 
    basic_usage
    ssi
+   clustering
    api
    contributing
 
