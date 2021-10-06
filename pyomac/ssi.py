@@ -610,3 +610,48 @@ def filter_ssi_single_order(
 
     # 4. return all conditions applied
     return filter_pairwise & filter_positive_damping & filter_max_damping
+
+
+def filter_ssi_poles(
+    frequencies: np.ndarray,
+    dampings: np.ndarray,
+    modeshapes: np.ndarray,
+    pairwise_occurence: bool = True,
+    positive_damping: bool = True,
+    max_damping: float = 0.15,
+) -> Tuple[List[np.ndarray], List[np.ndarray], List[np.ndarray]]:
+    """Filter a set of ssi poles based on filtering criteria.
+
+    Parameters
+    ----------
+    frequencies : np.ndarray
+        [description]
+    dampings : np.ndarray
+        [description]
+    modeshapes : np.ndarray
+        [description]
+    pairwise_occurence : bool, optional
+        If True, only return the first pole of poles that appear pairwise, by default True
+    positive_damping : bool, optional
+        If True, only return poles with positive damping, by default True
+    max_damping : float, optional
+        If specified, only return poles with damping below this threshold, by default 0.15
+
+    Returns
+    -------
+    Tuple[List[np.ndarray], List[np.ndarray], List[np.ndarray]]
+        [description]
+    """
+    filtered_indices = [
+        filter_ssi_single_order(
+            f, x, P, pairwise_occurence, positive_damping, max_damping
+        )
+        for f, x, P in zip(frequencies, dampings, modeshapes)
+    ]
+    filtered_freq = [f[i] for f, i in zip(frequencies, filtered_indices)]
+    filtered_xi = [x[i] for x, i in zip(dampings, filtered_indices)]
+    filtered_Phi = [P[i] for P, i in zip(modeshapes, filtered_indices)]
+    return filtered_freq, filtered_xi, filtered_Phi
+
+
+# TODO: implement consequtive_filtering
