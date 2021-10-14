@@ -27,7 +27,8 @@ setup(name='pyomac',
           'numpy',
           'scipy',
           'PeakUtils',
-          'matplotlib'
+          'matplotlib',
+          'scikit-learn'
       ],
       classifiers=[
           'Development Status :: 3 - Alpha',
