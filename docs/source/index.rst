@@ -39,6 +39,8 @@ Install pyomac by running:
    :caption: Contents:
 
    basic_usage
+   ssi
+   clustering
    api
    contributing
 
