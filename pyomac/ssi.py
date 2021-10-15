@@ -284,13 +284,13 @@ def _covariance_matrix(data: np.ndarray, n_block_rows: int) -> np.ndarray:
     assert n_channels < n_samples, "expected more samples than channels"
 
     # 1. initalize covariance matrices
-    R = np.zeros([n_channels, n_channels, n_block_rows * 2], dtype=data.dtype)
+    cov_matrix = np.zeros([n_channels, n_channels, n_block_rows * 2], dtype=data.dtype)
     for i in range(n_block_rows * 2):
         if i == 0:
-            R[:, :, i] = np.dot(data.T[:, :], data[:, :]) / n_samples
+            cov_matrix[:, :, i] = np.dot(data.T[:, :], data[:, :]) / n_samples
         else:
-            R[:, :, i] = np.dot(data.T[:, :-i], data[i:, :]) / n_samples
-    return R
+            cov_matrix[:, :, i] = np.dot(data.T[:, :-i], data[i:, :]) / n_samples
+    return cov_matrix
 
 
 def _block_toeplitz(covarianceMatrices: np.ndarray, n_block_rows=None) -> np.ndarray:
@@ -311,12 +311,12 @@ def _block_toeplitz(covarianceMatrices: np.ndarray, n_block_rows=None) -> np.nda
     else:
         i = n_block_rows // 2
 
-    T = np.zeros([n_channels * i, n_channels * i])
-    for jBlockRow in range(i):
-        row = covarianceMatrices[:, :, jBlockRow + i:jBlockRow:-1].reshape(
+    block_toeplitz_matrix = np.zeros([n_channels * i, n_channels * i])
+    for j_block_row in range(i):
+        row = covarianceMatrices[:, :, j_block_row + i:j_block_row:-1].reshape(
             [n_channels, n_channels * i], order='F')
-        T[jBlockRow * n_channels:(jBlockRow + 1) * n_channels, :] = row
-    return T
+        block_toeplitz_matrix[j_block_row * n_channels:(j_block_row + 1) * n_channels, :] = row
+    return block_toeplitz_matrix
 
 
 def _recover_system_matrices(U, S, V, n_channels, model_order=None):
@@ -342,16 +342,18 @@ def _recover_system_matrices(U, S, V, n_channels, model_order=None):
     return A, C
 
 
-def _modal_ID_from_system_matrices(A: np.ndarray, C: np.ndarray, dt: float):
+def _modal_id_from_system_matrices(A: np.ndarray, C: np.ndarray, dt: float):
     w, V = np.linalg.eig(A)
-    # Eigenvalues in continuous time:
+    # Transform eigenvalues from discrete time
+    # to eigenvalues in continuous time
+    # yielding the angular frequency:
     omega = np.log(w) / dt
     # real frequency as the undamped frequency of the system
     freq = np.abs(omega) / 2 / np.pi
     xi = - np.real(omega) / np.abs(omega)
     # Modeshapes
-    Psi = C @ V
-    return freq, xi, Psi.T
+    modeshape_matrix = C @ V
+    return freq, xi, modeshape_matrix.T
 
 
 def ssi_cov_poles(
@@ -392,13 +394,13 @@ def ssi_cov_poles(
     dt = 1 / fs
 
     # 1. build covariance matrices from data
-    R = _covariance_matrix(data, n_block_rows)
+    cov_matrix = _covariance_matrix(data, n_block_rows)
 
     # 2. construct block toeplitz matrix
-    T = _block_toeplitz(R, n_block_rows=n_block_rows)
+    block_toeplitz_matrix = _block_toeplitz(cov_matrix, n_block_rows=n_block_rows)
 
     # 3. SVD of block toeplitz matrix
-    U_full, S_full, V_full = np.linalg.svd(T)
+    U_full, S_full, V_full = np.linalg.svd(block_toeplitz_matrix)
 
     # # 4. determine maxmodel_order, if not given
     # if not maxmodel_order:  # if no maxmodel_order has been defined
@@ -417,7 +419,7 @@ def ssi_cov_poles(
             U_full, S_full, V_full, n_channels, model_order=i_order)
 
         # 5.b. modal ID based on system matrices
-        freq_temp, xi_temp, Psi_temp = _modal_ID_from_system_matrices(A, C, dt)
+        freq_temp, xi_temp, Psi_temp = _modal_id_from_system_matrices(A, C, dt)
         freq.append(freq_temp)
         xi.append(xi_temp)
         Psi.append(Psi_temp)
@@ -463,13 +465,13 @@ def ssi_cov_poles_for_model_order(
     assert n_block_rows >= model_order, "n_block_rows must be greater or equal than model_order"
 
     # 1. build covariance matrices from data
-    R = _covariance_matrix(data, n_block_rows)
+    cov_matrix = _covariance_matrix(data, n_block_rows)
 
     # 2. construct block toeplitz matrix
-    T = _block_toeplitz(R, n_block_rows=n_block_rows)
+    block_toeplitz_matrix = _block_toeplitz(cov_matrix, n_block_rows=n_block_rows)
 
     # 3. SVD of block toeplitz matrix
-    U_full, S_full, V_full = np.linalg.svd(T)
+    U_full, S_full, V_full = np.linalg.svd(block_toeplitz_matrix)
 
     # 4. recover A,C based on SVD and model order
     A, C = _recover_system_matrices(
@@ -477,7 +479,7 @@ def ssi_cov_poles_for_model_order(
 
     # 5. modal ID based on system matrices
     dt = 1 / fs
-    freq, xi, Psi = _modal_ID_from_system_matrices(A, C, dt)
+    freq, xi, Psi = _modal_id_from_system_matrices(A, C, dt)
     return freq, xi, Psi
 
 
@@ -560,15 +562,6 @@ def filter_ssi_single_order(
     np.ndarray
         An 1-dimensional (model_order x 1) array boolean mask with the filtered poles.
     """
-    # Filter a single ssi model order based on acceptrance criteria.
-    # Parameters
-    # ----------
-    # freq: np.ndarray
-    #     An 1-dimensional (model_order x 1) array containing the undamped eigenfrequencies of the identified poles.
-    # xi: np.ndarray
-    #     An 1-dimensional (model_order x 1) array containing the damping ratios of the identified poles.
-    # Psi: np.ndarray
-    #     A 2-dimensional (model_order x n_channels) array containing the modeshapes of the identified poles.
 
     # 0. determine parameters
     assert freq.ndim == xi.ndim == 1
