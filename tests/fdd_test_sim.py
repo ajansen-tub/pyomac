@@ -2,8 +2,8 @@ import unittest
 
 from pyomac import fdd, peak_picking
 
-from statespace_model import get_model
-from simulation import generate_impulse_data, generate_random_data, assert_modal_identification
+from tests.statespace_model import get_model
+from tests.simulation import generate_impulse_data, generate_random_data, assert_modal_identification
 
 
 class FddTest(unittest.TestCase):

@@ -1,8 +1,8 @@
 import unittest
 from pyomac import ssi_cov
 
-from statespace_model import get_model
-from simulation import generate_random_data, assert_modal_identification
+from tests.statespace_model import get_model
+from tests.simulation import generate_random_data, assert_modal_identification
 
 
 class SsiTest(unittest.TestCase):
