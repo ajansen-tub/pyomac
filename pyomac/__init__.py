@@ -7,3 +7,4 @@ from pyomac.ssi import (
     filter_ssi_poles,
 )
 from pyomac import clustering
+from pyomac import plot
