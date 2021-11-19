@@ -1,4 +1,5 @@
 Toolbox for operational modal analysis in python.
+[![Documentation Status](https://readthedocs.org/projects/pyomac/badge/?version=latest)](https://pyomac.readthedocs.io/en/latest/?badge=latest)
 
 # ToDo:
 
