@@ -190,13 +190,13 @@ def MAC_matrix(phi_1: np.ndarray, phi_2: np.ndarray) -> np.ndarray:
     # "it should only be used for vectors."
     # https://numpy.org/doc/stable/reference/generated/numpy.vdot.html
     if np.iscomplexobj(phi_1) or np.iscomplexobj(phi_2):
-        return np.abs(np.dot(phi_1, phi_2.conj().T)) / (
+        return np.square(np.abs(np.dot(phi_1, phi_2.conj().T)) / (
             np.linalg.norm(phi_1, axis=1)[:, np.newaxis] * np.linalg.norm(phi_2, axis=1)
-        )
+        ))
     elif np.isrealobj(phi_1) and np.isrealobj(phi_2):
-        return np.abs(np.dot(phi_1, phi_2.T)) / (
+        return np.square(np.abs(np.dot(phi_1, phi_2.T)) / (
             np.linalg.norm(phi_1, axis=1)[:, np.newaxis] * np.linalg.norm(phi_2, axis=1)
-        )
+        ))
     else:
         raise ValueError("Only implemented for complex or real modes")
 
