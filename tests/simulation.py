@@ -1,5 +1,5 @@
 import numpy as np
-from statespace_model import solver
+from .statespace_model import solver
 from scipy.spatial.distance import cdist
 from pyomac.misc import mac_value, err_rel
 
