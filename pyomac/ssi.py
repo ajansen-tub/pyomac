@@ -1,5 +1,6 @@
 """Stochastic Subspace Identification (SSI) module for pyomac."""
 from typing import List, Tuple
+import warnings
 
 import numpy as np
 from scipy.cluster.hierarchy import fcluster, linkage
@@ -64,6 +65,7 @@ def ssi_cov(data: np.ndarray, fs: float, ts: float = 5., eps_fn: float = 0.02, e
     Last changed: ajansen, 2021-06-01
     """
 
+    warnings.warn("This implementation of 'ssi_cov' is about to be deprecated. Future API will change.", PendingDeprecationWarning)
     if data.shape[1] < data.shape[0]:
         data = data.T
 
