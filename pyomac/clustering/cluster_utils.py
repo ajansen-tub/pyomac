@@ -1,5 +1,6 @@
 """Clustering procedures for modes."""
 
+from os import FileLike
 from typing import List, Sequence, Tuple, Optional, Union, NamedTuple
 
 import matplotlib.pyplot as plt
@@ -194,7 +195,7 @@ def MAC_matrix(phi_1: np.ndarray, phi_2: np.ndarray) -> np.ndarray:
             np.linalg.norm(phi_1, axis=1)[:, np.newaxis] * np.linalg.norm(phi_2, axis=1)
         ))
     elif np.isrealobj(phi_1) and np.isrealobj(phi_2):
-        return np.square(np.abs(np.dot(phi_1, phi_2.T)) / (
+        return np.square(np.dot(phi_1, phi_2.T) / (
             np.linalg.norm(phi_1, axis=1)[:, np.newaxis] * np.linalg.norm(phi_2, axis=1)
         ))
     else:
