@@ -34,6 +34,10 @@ class ModalSet(NamedTuple):
             n=self.frequencies.shape[0], f=self.frequencies, s=self.modeshapes.shape
         )
 
+    @property
+    def n_modes(self):
+        return self.frequencies.shape[0]
+
 
 class IndexedModalSet(NamedTuple):
     """Represents a modal set.
@@ -63,6 +67,10 @@ class IndexedModalSet(NamedTuple):
             s=self.modeshapes.shape,
             i=self.indices,
         )
+
+    @property
+    def n_modes(self):
+        return self.frequencies.shape[0]
 
 
 GeneralizedModalSet = Union[ModalSet, IndexedModalSet]
@@ -190,18 +198,28 @@ def MAC_matrix(phi_1: np.ndarray, phi_2: np.ndarray) -> np.ndarray:
     # "it should only be used for vectors."
     # https://numpy.org/doc/stable/reference/generated/numpy.vdot.html
     if np.iscomplexobj(phi_1) or np.iscomplexobj(phi_2):
-        return np.square(np.abs(np.dot(phi_1, phi_2.conj().T)) / (
-            np.linalg.norm(phi_1, axis=1)[:, np.newaxis] * np.linalg.norm(phi_2, axis=1)
-        ))
+        return np.square(
+            np.abs(np.dot(phi_1, phi_2.conj().T))
+            / (
+                np.linalg.norm(phi_1, axis=1)[:, np.newaxis]
+                * np.linalg.norm(phi_2, axis=1)
+            )
+        )
     elif np.isrealobj(phi_1) and np.isrealobj(phi_2):
-        return np.square(np.abs(np.dot(phi_1, phi_2.T)) / (
-            np.linalg.norm(phi_1, axis=1)[:, np.newaxis] * np.linalg.norm(phi_2, axis=1)
-        ))
+        return np.square(
+            np.abs(np.dot(phi_1, phi_2.T))
+            / (
+                np.linalg.norm(phi_1, axis=1)[:, np.newaxis]
+                * np.linalg.norm(phi_2, axis=1)
+            )
+        )
     else:
         raise ValueError("Only implemented for complex or real modes")
 
 
-def _distance_matrix(all_freq: np.ndarray, all_Psi: np.ndarray) -> np.ndarray:
+def _distance_matrix(
+    all_freq: np.ndarray, all_Psi: np.ndarray, modeshape_weight: float = 1
+) -> np.ndarray:
     """Create a distance matrix for clustering based on modal frequencies and shapes.
 
     This distance metric is based on:
@@ -231,7 +249,7 @@ def _distance_matrix(all_freq: np.ndarray, all_Psi: np.ndarray) -> np.ndarray:
     distance_MAC = _autoMAC(all_Psi)
 
     # 3) distance matrix
-    distanceMatrix = distance_frequencies + 1 - distance_MAC
+    distanceMatrix = distance_frequencies + modeshape_weight * (1 - distance_MAC)
     return np.around(distanceMatrix, decimals=10)
 
 
@@ -239,6 +257,8 @@ def _hierarchical_clustering(
     freq: Sequence[np.ndarray],
     Psi: Sequence[np.ndarray],
     distance_threshold: float = 0.2,
+    linkage: str = "single",
+    modeshape_weight: float = 1,
 ) -> AgglomerativeClustering:
     """Perform agglomerative (hierarchical) clustering on sequences of frequencies and modeshapes.
 
@@ -261,17 +281,17 @@ def _hierarchical_clustering(
     assert len(freq) == len(Psi)
 
     # 1) flatten data structures to arrays
-    all_freq = np.concatenate(freq)
+    all_freq = np.squeeze(np.concatenate(freq))  # squeeze prevents dimension errors
     all_Psi = np.concatenate(Psi, axis=0)
 
     # 2) precompute weights for distance-based clustering
-    D = _distance_matrix(all_freq, all_Psi)
+    D = _distance_matrix(all_freq, all_Psi, modeshape_weight)
 
     # 3) clustering phase
     cluster = AgglomerativeClustering(
         n_clusters=None,
         affinity="precomputed",
-        linkage="single",
+        linkage=linkage,
         distance_threshold=distance_threshold,
         compute_full_tree=True,
     ).fit(D)
@@ -281,6 +301,8 @@ def _hierarchical_clustering(
 def modal_clusters(
     indexed_modal_sets: Sequence[IndexedModalSet],
     distance_threshold: float = 0.2,
+    linkage: str = "single",
+    modeshape_weight: float = 1,
 ) -> Tuple[IndexedModalSet, ...]:
     """Cluster an indexed Sequence of modes.
 
@@ -319,7 +341,11 @@ def modal_clusters(
 
     # 3) cluster based on frequencies and modeshapes:
     cluster = _hierarchical_clustering(
-        freq=freq, Psi=Psi, distance_threshold=distance_threshold
+        freq=freq,
+        Psi=Psi,
+        distance_threshold=distance_threshold,
+        linkage=linkage,
+        modeshape_weight=modeshape_weight,
     )
 
     # 4) rearrange clusters into IndexedModalSets
