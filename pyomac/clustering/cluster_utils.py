@@ -394,6 +394,7 @@ def filter_clusters(
     max_freq_cov: float = 0.01,
     min_MAC: float = 0.9,
     min_n_modes: int = 3,
+    notch_filter_bands: Optional[Sequence[Tuple[float, float]]] = None,
 ) -> Tuple[IndexedModalSet, ...]:
     """Filter a sequence of IndexedModalSets based on their statistics.
 
@@ -418,6 +419,8 @@ def filter_clusters(
         [description]
     """
 
+    if notch_filter_bands is None:
+        notch_filter_bands = [(0.0, 0.0)]
     def _filter_set_(set: IndexedModalSet) -> bool:
         mean_freq, _, mean_MAC, stdev_freq, _, _ = single_set_statistics(set)
         n_modes = set.frequencies.shape[0]
@@ -425,6 +428,7 @@ def filter_clusters(
             (stdev_freq / mean_freq < max_freq_cov)
             and (mean_MAC > min_MAC)
             and (n_modes >= min_n_modes)
+            and not any(lower_bound <= mean_freq <= upper_bound for lower_bound, upper_bound in notch_filter_bands)
         ):
             return True
         else:
