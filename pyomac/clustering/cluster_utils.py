@@ -446,6 +446,7 @@ def plot_indexed_clusters(
     max_freq_cov: float = 0.01,
     min_MAC: float = 0.9,
     min_n_modes: int = 3,
+    index_offset: Optional[int] = 0,
 ) -> Tuple[Figure, Axes]:
     """Plot clusters as frequencies over indices or vice versa.
 
@@ -467,6 +468,8 @@ def plot_indexed_clusters(
         [description], by default 0.9
     min_n_modes : int, optional
         [description], by default 3
+    index_offset : int, optional
+        offset index, by default 0
 
     Returns
     -------
@@ -522,14 +525,14 @@ def plot_indexed_clusters(
         mf, _, mean_MAC, sf, _, _ = single_set_statistics(cluster)
         if flip_axes:
             ax.scatter(
-                cluster.indices,
+                cluster.indices + index_offset,
                 cluster.frequencies,
                 label=f"{mf:02.3f} +- {(sf/mf):.2%} Hz",
             )
         else:
             ax.scatter(
                 cluster.frequencies,
-                cluster.indices,
+                cluster.indices + index_offset,
                 label=f"{mf:02.3f} +- {(sf/mf):.2%} Hz",
             )
 
