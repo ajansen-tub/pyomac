@@ -1,12 +1,53 @@
 """Clustering procedures for modes."""
+import time
 
-from typing import List, Sequence, Tuple, Optional, Union, NamedTuple
+from typing import List, Sequence, Tuple, Optional, Union, NamedTuple, Callable
 
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.cluster import AgglomerativeClustering
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+
+MAX_CHUNKSIZE_CLUSTERING = 256
+
+
+class TimerContext:
+    """Timer Context Manager for measuring execution time of code blocks."""
+
+    def __init__(self, message: Optional[str] = None):
+        self.message = message
+
+    def __enter__(self):
+        """Start the timer."""
+        self._tic = time.perf_counter()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Stop the timer and print the formatted elapsed time."""
+        elapsed_time = time.perf_counter() - self._tic
+        formatted_time = self.format_time(elapsed_time)
+        msg = f"{self.message} - " if self.message else ""
+        color_prefix = ""
+        color_suffix = ""
+
+        print(f"{color_prefix}{msg}Elapsed time: {formatted_time}.{color_suffix}")
+
+        # Re-raise any exception that occurred in the with block
+        if exc_type:
+            raise
+
+    @staticmethod
+    def format_time(seconds):
+        """Format time to display hours, minutes, and seconds as appropriate."""
+        hours, remainder = divmod(seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        if hours:
+            return f"{int(hours)} h {int(minutes)} min"
+        elif minutes:
+            return f"{int(minutes)} min {seconds:0.2f} s"
+        else:
+            return f"{seconds:0.4f} s"
+
 
 # Data type definitions:
 
@@ -253,6 +294,508 @@ def _distance_matrix(
     return np.around(distanceMatrix, decimals=10)
 
 
+def _distance_matrix_memory_efficient(
+    all_freq: np.ndarray, all_Psi: np.ndarray, modeshape_weight: float = 1
+) -> np.ndarray:
+    """Create a distance matrix for clustering based on modal frequencies and shapes.
+
+    This distance metric is based on:
+    REYNDERS, E., J. HOUBRECHTS AND G. DE ROECK
+    Fully automated (operational) modal analysis.
+    Mechanical Systems and Signal Processing, 2012, 29, 228-250.
+
+    Parameters
+    ----------
+    all_freq : np.ndarray
+        A 1-dimensional (n_modes x 1) array containing the undamped eigenfrequencies
+    all_Psi : np.ndarray
+        A 2-dimensional (n_modes x n_dof) array containing the modeshapes
+
+    Returns
+    -------
+    np.ndarray
+        A 2-dimensional (n_modes x n_modes) array representing the distance matrix
+    """
+    # 0) assertions
+    assert all_freq.shape[0] == all_Psi.shape[0]
+
+    # Precompute norm
+    with TimerContext("Linalg norm"):
+        norm_Psi = np.linalg.norm(all_Psi, axis=1).astype(np.float32)
+
+    # Convert inputs to float32 if they aren't already
+    with TimerContext("Downcasting"):
+        with np.errstate(under="ignore"):
+            all_freq = all_freq.astype(np.float32)
+            all_Psi = all_Psi.astype(np.float32)
+
+    # MAC_matrix functionality integrated
+    with TimerContext("MAC"):
+        if np.iscomplexobj(all_Psi):
+            mac_result = np.dot(all_Psi, all_Psi.conj().T).astype(np.float32)
+        elif np.isrealobj(all_Psi):
+            mac_result = np.dot(all_Psi, all_Psi.T).astype(np.float32)
+        else:
+            raise ValueError("Only implemented for complex or real modes")
+
+        np.square(np.abs(mac_result, out=mac_result), out=mac_result)
+        mac_result /= norm_Psi[:, np.newaxis]
+        mac_result /= norm_Psi
+        print(f"{mac_result.nbytes=}")
+
+    # Frequency distances calculation
+    with TimerContext("freq diff"):
+        freq_diff = all_freq[:, np.newaxis] - all_freq
+        np.abs(freq_diff, out=freq_diff)
+        np.maximum(all_freq[:, np.newaxis], all_freq, out=all_freq)
+        freq_diff /= all_freq
+        print(f"{freq_diff.nbytes=}")
+
+    # Final distance matrix calculation
+    with TimerContext("distance matrix"):
+        distanceMatrix = freq_diff + modeshape_weight * (1 - mac_result)
+        np.around(distanceMatrix, decimals=10, out=distanceMatrix)
+    return distanceMatrix
+
+
+def _compute_meta_distance_matrix(
+    aggregated_clusters,
+    modeshape_weight: float = 1,
+    linkage: str = "single",
+) -> np.ndarray:
+    """
+    Compute the meta distance matrix for a set of aggregated clusters.
+
+    This function calculates the pairwise distances between each pair of aggregated clusters
+    using a specified linkage method. The distance is computed based on the frequency and
+    modeshape data of the clusters.
+
+    Parameters
+    ----------
+    aggregated_clusters : List[Tuple[np.ndarray, np.ndarray]]
+        A list of tuples, where each tuple contains the frequency (first element) and
+        modeshape (second element) data for an aggregated cluster.
+    linkage : str
+        The linkage criterion to use for calculating the distance between clusters.
+        It should be compatible with the `_inter_cluster_distance` function.
+
+    Returns
+    -------
+    np.ndarray
+        A symmetric 2D array (matrix) where the element at [i, j] represents the distance
+        between the i-th and j-th cluster. The matrix is of size `num_clusters x num_clusters`,
+        where `num_clusters` is the number of aggregated clusters.
+
+    Notes
+    -----
+    The function assumes that the distance between each pair of clusters is symmetric,
+    i.e., the distance from cluster i to cluster j is the same as from cluster j to cluster i.
+    The `_inter_cluster_distance` function is used to compute the distance between two clusters,
+    which should be defined elsewhere in the code and should be compatible with the linkage method used.
+    """
+    num_clusters = len(aggregated_clusters)
+    meta_distance_matrix = np.zeros((num_clusters, num_clusters), dtype=np.float)
+    for i in range(num_clusters):
+        for j in range(i + 1, num_clusters):  # Matrix is symmetric
+            dist = _inter_cluster_distance(
+                aggregated_clusters[i][0],
+                aggregated_clusters[j][0],
+                aggregated_clusters[i][1],
+                aggregated_clusters[j][1],
+                modeshape_weight=modeshape_weight,
+                linkage=linkage,
+            )
+            meta_distance_matrix[i, j] = dist
+            meta_distance_matrix[j, i] = dist
+
+
+def _inter_cluster_distance(
+    freq_1: np.ndarray,
+    freq_2: np.ndarray,
+    Psi_1: np.ndarray,
+    Psi_2: np.ndarray,
+    modeshape_weight: float = 1,
+    linkage: str = "single",
+) -> np.ndarray:
+    """
+    Compute the distance between two clusters based on their frequency and modeshape data.
+
+    This function calculates the distance between two clusters using different linkage criteria:
+    'single', 'complete', 'average', or 'centroid'. The distance metric is based on the frequency
+    (freq) and modeshape (Psi) data of the clusters.
+
+    Parameters
+    ----------
+    freq_1 : np.ndarray
+        An array of frequencies for the first cluster.
+    freq_2 : np.ndarray
+        An array of frequencies for the second cluster.
+    Psi_1 : np.ndarray
+        An array of modeshapes for the first cluster.
+    Psi_2 : np.ndarray
+        An array of modeshapes for the second cluster.
+    modeshape_weight : float, optional
+        A weight factor for the modeshapes in the distance calculation, by default 1.
+    linkage : str, optional
+        The linkage criterion to use for calculating the distance. It can be 'single', 'complete',
+        'average', or 'centroid', by default 'single'.
+
+    Returns
+    -------
+    np.ndarray
+        The computed distance between the two clusters.
+
+    Raises
+    ------
+    ValueError
+        If an unknown linkage type is provided.
+
+    Notes
+    -----
+    - 'single' linkage computes the minimum distance between any two points in each pair of clusters.
+    - 'complete' linkage computes the maximum distance between any two points in each pair of clusters.
+    - 'average' linkage computes the average distance between points in each pair of clusters.
+    - 'centroid' linkage computes the distance between the centroids of the clusters, factoring in
+      both frequency and modeshape data.
+
+    The function assumes that the frequency data (freq_1, freq_2) and the modeshape data (Psi_1, Psi_2)
+    correspond to each other in the context of the clusters being compared.
+    """
+    if linkage == "single":
+        # For single linkage, compute the minimum distance between any two points in each pair of clusters
+        return np.min(
+            _inter_cluster_distance_matrix(
+                freq_1, freq_2, Psi_1, Psi_2, modeshape_weight
+            )
+        )
+    elif linkage == "complete":
+        # For complete linkage, compute the maximum distance between any two points in each pair of clusters
+        return np.max(
+            _inter_cluster_distance_matrix(
+                freq_1, freq_2, Psi_1, Psi_2, modeshape_weight
+            )
+        )
+    elif linkage == "average":
+        # For average linkage, compute the average distance between points in each pair of clusters
+        return np.mean(
+            _inter_cluster_distance_matrix(
+                freq_1, freq_2, Psi_1, Psi_2, modeshape_weight
+            )
+        )
+    elif linkage == "centroid":
+        # For centroid linkage, compute the distance between the centroids of clusters
+        mean_f_1 = np.mean(freq_1)
+        mean_f_2 = np.mean(freq_2)
+        mac_result = _MAC(Psi_1, Psi_2)
+        dist_freq = np.abs(mean_f_1 - mean_f_2) / np.fmax(mean_f_1, mean_f_2)
+        return dist_freq + modeshape_weight * (1 - mac_result)
+    else:
+        raise ValueError("Unknown linkage type")
+
+
+def _inter_cluster_distance_matrix(
+    freq_1: np.ndarray,
+    freq_2: np.ndarray,
+    Psi_1: np.ndarray,
+    Psi_2: np.ndarray,
+    modeshape_weight: float = 1,
+) -> np.ndarray:
+    """Create a distance matrix between two clusters based on modal frequencies and shapes.
+
+    This distance metric is based on:
+    REYNDERS, E., J. HOUBRECHTS AND G. DE ROECK
+    Fully automated (operational) modal analysis.
+    Mechanical Systems and Signal Processing, 2012, 29, 228-250.
+
+    Parameters
+    ----------
+    freq_1 : np.ndarray
+        A 1-dimensional (n_modes x 1) array containing the undamped eigenfrequencies
+    freq_2 : np.ndarray
+        A 1-dimensional (n_modes x 1) array containing the undamped eigenfrequencies
+    Psi_1 : np.ndarray
+        A 2-dimensional (n_modes x n_dof) array containing the modeshapes
+    Psi_2 : np.ndarray
+        A 2-dimensional (n_modes x n_dof) array containing the modeshapes
+
+    Returns
+    -------
+    np.ndarray
+        A 2-dimensional (n_modes x n_modes) array representing the distance matrix
+    """
+    # 0) assertions
+    assert freq_1.shape[0] == freq_2.shape[0] == Psi_1.shape[0] == Psi_2.shape[0]
+
+    # Convert inputs to float32 if they aren't already
+    freq_1 = freq_1.astype(np.float32)
+    freq_2 = freq_2.astype(np.float32)
+    Psi_1 = Psi_1.astype(np.float32)
+    Psi_2 = Psi_2.astype(np.float32)
+
+    mac_result = MAC_matrix(Psi_1, Psi_2).astype(np.float32)
+
+    # Frequency distances calculation
+    freq_diff = freq_1[:, np.newaxis] - freq_2
+    np.abs(freq_diff, out=freq_diff)
+    freq_diff /= np.fmax(freq_1[:, np.newaxis], freq_2[np.newaxis, :])
+
+    # Final distance matrix calculation
+
+    distanceMatrix = freq_diff + modeshape_weight * (1 - mac_result)
+    np.around(distanceMatrix, decimals=10, out=distanceMatrix)
+    return distanceMatrix
+
+
+def _hierarchical_clustering_chunked(
+    freq: Sequence[np.ndarray],
+    Psi: Sequence[np.ndarray],
+    chunk_size: int,
+    distance_threshold: float = 0.2,
+    linkage: str = "single",
+    modeshape_weight: float = 1,
+) -> List[np.ndarray]:
+    """
+    Perform divide-and-conquer hierarchical clustering on sequences of frequencies and modeshapes.
+
+    Parameters
+    ----------
+    freq: Sequence[np.ndarray]
+        A sequence of 1D arrays containing frequencies.
+    Psi: Sequence[np.ndarray]
+        A sequence of 2D arrays containing modeshapes.
+    chunk_size: int
+        The maximum size of each chunk for divide-and-conquer approach.
+    distance_threshold: float, optional
+        The threshold for clustering.
+    linkage: str, optional
+        The linkage criterion ('single', 'complete', 'average', 'centroid').
+    modeshape_weight: float, optional
+        A weight factor for the modeshapes in distance calculation.
+
+    Returns
+    -------
+    List[np.ndarray]
+        A list of cluster labels for each data point.
+    """
+
+    # Step 1: Chunking the Data
+    chunks = _create_chunks(freq, Psi, chunk_size)
+
+    # Step 2: Clustering Each Chunk Independently
+    chunk_cluster_labels = [
+        _cluster_chunk(chunk, distance_threshold, linkage, modeshape_weight)
+        for chunk in chunks
+    ]
+
+    # Step 3: Merging Clusters Across Chunks
+    final_labels = _merge_clusters(
+        chunks=chunks, chunk_clusters=chunk_cluster_labels, linkage=linkage
+    )
+
+    return final_labels
+
+
+def _create_chunks(
+    freq: Sequence[np.ndarray], Psi: Sequence[np.ndarray], chunk_size: int
+):
+    """
+    Divide the data into chunks.
+
+    Parameters
+    ----------
+    freq: Sequence[np.ndarray]
+        A sequence of 1D arrays containing frequencies.
+    Psi: Sequence[np.ndarray]
+        A sequence of 2D arrays containing modeshapes.
+    chunk_size: int
+        The maximum size of each chunk.
+
+    Returns
+    -------
+    List[Tuple[np.ndarray, np.ndarray]]
+        A list of tuples, each containing a chunk of freq and Psi.
+    """
+
+    # Ensure that freq and Psi have the same number of elements
+    assert len(freq) == len(Psi), "The length of freq and Psi must be the same."
+
+    # Flatten the freq and Psi arrays
+    all_freq = np.concatenate(freq)
+    all_Psi = np.concatenate(Psi, axis=0)
+
+    # Ensure the concatenated dimensions are compatible
+    assert (
+        all_freq.shape[0] == all_Psi.shape[0]
+    ), "Mismatch in number of elements between freq and Psi."
+
+    # Create chunks
+    chunks = []
+    total_samples = len(all_freq)
+    for start_idx in range(0, total_samples, chunk_size):
+        end_idx = min(start_idx + chunk_size, total_samples)
+        chunk_freq = all_freq[start_idx:end_idx]
+        chunk_Psi = all_Psi[start_idx:end_idx, :]
+        chunks.append((chunk_freq, chunk_Psi))
+
+    return chunks
+
+
+def _cluster_chunk(chunk, distance_threshold, linkage, modeshape_weight):
+    """
+    Cluster an individual chunk using the hierarchical clustering method.
+
+    Parameters
+    ----------
+    chunk: Tuple[np.ndarray, np.ndarray]
+        A tuple containing a chunk of freq and Psi data.
+    distance_threshold: float
+        The threshold for clustering.
+    linkage: str
+        The linkage criterion ('single', 'complete', 'average', 'centroid').
+    modeshape_weight: float
+        A weight factor for the modeshapes in distance calculation.
+
+    Returns
+    -------
+    np.ndarray
+        Cluster labels for this chunk.
+    """
+    freq_chunk, Psi_chunk = chunk
+    # Ensure that the chunk data is in the correct format (sequence of arrays)
+    freq_chunk = [freq_chunk]
+    Psi_chunk = [Psi_chunk]
+
+    # Apply hierarchical clustering to the chunk
+    cluster = _hierarchical_clustering(
+        freq=freq_chunk,
+        Psi=Psi_chunk,
+        distance_threshold=distance_threshold,
+        linkage=linkage,
+        modeshape_weight=modeshape_weight,
+    )
+
+    # Return the cluster labels
+    return cluster.labels_
+
+
+def _merge_clusters(
+    chunks,
+    chunk_clusters,
+    linkage: str = "single",
+    distance_threshold: float = 0.2,
+):
+    """
+    Merge clusters from different chunks.
+
+    Parameters
+    ----------
+    chunks: List[Tuple[np.ndarray, np.ndarray]]
+        A list of tuples containing chunks of freq and Psi data.
+    chunk_clusters: List[np.ndarray]
+        A list where each element contains the cluster labels for a chunk.
+    linkage: str
+        The linkage criterion ('single', 'complete', 'average', 'centroid').
+    distance_threshold : float, optional
+        [description], by default 0.2
+
+    Returns
+    -------
+    np.ndarray
+        The final cluster labels after merging.
+    """
+
+    # Aggregate cluster data from each chunk
+    aggregated_clusters = _aggregate_cluster_data(chunks, chunk_clusters)
+
+    # Compute the meta distance matrix between clusters
+    meta_distance_matrix = _compute_meta_distance_matrix(aggregated_clusters, linkage)
+
+    # Apply hierarchical clustering to the meta distance matrix
+    final_clustering = AgglomerativeClustering(
+        affinity="precomputed",
+        linkage=linkage,
+        n_clusters=None,
+        distance_threshold=distance_threshold,
+    )
+    final_clustering.fit(meta_distance_matrix)
+
+    # Map the cluster labels from final clustering back to the original data points
+    final_labels = _map_labels_to_original_data(
+        final_clustering.labels_, chunk_clusters
+    )
+
+    return final_labels
+
+
+def _aggregate_cluster_data(chunks, chunk_clusters):
+    """
+    Aggregate the freq and Psi data for each cluster identified in each chunk.
+
+    Parameters
+    ----------
+    chunks: List[Tuple[np.ndarray, np.ndarray]]
+        A list of tuples containing chunks of freq and Psi data.
+    chunk_clusters: List[np.ndarray]
+        A list where each element contains the cluster labels for a chunk.
+
+    Returns
+    -------
+    List[Tuple[np.ndarray, np.ndarray]]
+        A list of tuples, each containing aggregated freq and Psi data for a cluster.
+    """
+    aggregated_clusters = []
+
+    for (chunk_freq, chunk_Psi), labels in zip(chunks, chunk_clusters):
+        unique_labels = np.unique(labels)
+
+        for label in unique_labels:
+            # Indices of data points in this cluster
+            indices = np.where(labels == label)[0]
+
+            # Aggregate freq and Psi data for this cluster
+            aggregated_freq = chunk_freq[indices]
+            aggregated_Psi = chunk_Psi[indices, :]
+
+            aggregated_clusters.append((aggregated_freq, aggregated_Psi))
+
+    return aggregated_clusters
+
+
+def _map_labels_to_original_data(final_labels, chunk_clusters):
+    """
+    Map the final cluster labels from the merged clusters back to the original data points.
+
+    Parameters
+    ----------
+    final_labels : np.ndarray
+        The cluster labels obtained from the final clustering of the meta clusters.
+    chunk_clusters : List[np.ndarray]
+        A list where each element contains the cluster labels for a chunk.
+
+    Returns
+    -------
+    np.ndarray
+        An array of cluster labels for each original data point.
+    """
+
+    # Initialize an empty list to store the final mapped labels
+    mapped_labels = []
+
+    # Counter for the number of clusters already processed
+    cluster_counter = 0
+
+    # Iterate over each chunk's cluster labels
+    for labels in chunk_clusters:
+        # Map each chunk's cluster label to the final cluster label
+        mapped_chunk_labels = [final_labels[cluster_counter + label] for label in labels]
+        mapped_labels.extend(mapped_chunk_labels)
+
+        # Update the cluster counter by the number of unique clusters in this chunk
+        cluster_counter += len(np.unique(labels))
+
+    return np.array(mapped_labels)
+
+
 def _hierarchical_clustering(
     freq: Sequence[np.ndarray],
     Psi: Sequence[np.ndarray],
@@ -285,7 +828,7 @@ def _hierarchical_clustering(
     all_Psi = np.concatenate(Psi, axis=0)
 
     # 2) precompute weights for distance-based clustering
-    D = _distance_matrix(all_freq, all_Psi, modeshape_weight)
+    D = _distance_matrix_memory_efficient(all_freq, all_Psi, modeshape_weight)
 
     # 3) clustering phase
     cluster = AgglomerativeClustering(
@@ -304,22 +847,42 @@ def modal_clusters(
     linkage: str = "single",
     modeshape_weight: float = 1,
 ) -> Tuple[IndexedModalSet, ...]:
-    """Cluster an indexed Sequence of modes.
+    """
+    Perform hierarchical clustering on a sequence of modal data sets.
 
-    The index may be method-specific parameter (e.g. the model order in SSI)
-    or the index of a dataset in a sequence of datasets.
+    This function clusters modal data based on their frequencies and modeshapes. It supports
+    both standard and chunked hierarchical clustering, depending on the size of the data. For
+    larger datasets, a divide-and-conquer approach is used to manage computational complexity.
 
     Parameters
     ----------
-    indexed_modal_sets = Sequence[IndexedModalSet]
-        A Sequence of IndexedModalSet
+    indexed_modal_sets : Sequence[IndexedModalSet]
+        A sequence of IndexedModalSet objects. Each IndexedModalSet contains data related to
+        a specific mode, including its index, frequency, damping ratio, and modeshape.
     distance_threshold : float, optional
-        [description], by default 0.2
+        The threshold for clustering. Clusters are merged if their distance is below this
+        threshold. Default is 0.2.
+    linkage : str, optional
+        The linkage criterion to use in hierarchical clustering. Options include 'single',
+        'complete', 'average', and 'centroid'. Default is 'single'.
+    modeshape_weight : float, optional
+        A weight factor for the modeshapes in the distance calculation. Default is 1.
 
     Returns
     -------
     Tuple[IndexedModalSet, ...]
-        The sequence of
+        A tuple of IndexedModalSet objects, each representing a cluster of modes. The modes
+        in each cluster are similar based on their frequencies and modeshapes.
+
+    Notes
+    -----
+    - The function decides whether to use standard or chunked clustering based on the total
+      number of modes. If the number of modes exceeds a predefined threshold (MAX_CHUNKSIZE_CLUSTERING),
+      chunked clustering is used.
+    - In chunked clustering, the data is divided into smaller chunks, each of which is clustered
+      independently. The clusters are then merged across chunks.
+    - This function is particularly useful in modal analysis where clustering of modes is required
+      to identify similar behavior or characteristics among different modes.
     """
     # 0) transformation, assertions
     index, freq, xi, Psi = zip(*indexed_modal_sets)
@@ -331,33 +894,50 @@ def modal_clusters(
     all_xi = np.concatenate(xi)
     all_Psi = np.concatenate(Psi, axis=0)
 
-    # 2) replicate the index of a set for every item of the set
-    # list_of_indices = []
-    # for i, f, x, P in zip(index, freq, xi, Psi):
-    #     assert f.shape == x.shape
-    #     assert f.shape[0] == P.shape[0]
-    #     list_of_indices.append(np.full(f.shape, i))
-    # all_indices = np.concatenate(list_of_indices)
-
-    # 3) cluster based on frequencies and modeshapes:
-    cluster = _hierarchical_clustering(
-        freq=freq,
-        Psi=Psi,
-        distance_threshold=distance_threshold,
-        linkage=linkage,
-        modeshape_weight=modeshape_weight,
-    )
-
-    # 4) rearrange clusters into IndexedModalSets
-    return tuple(
-        IndexedModalSet(
-            all_indices[cluster.labels_ == i],
-            all_freq[cluster.labels_ == i],
-            all_xi[cluster.labels_ == i],
-            all_Psi[cluster.labels_ == i, :],
+    # 2) determine, if clustering needs to be processed chunk-wise
+    n_total_modes = len(all_indices)
+    if n_total_modes < MAX_CHUNKSIZE_CLUSTERING:
+        # 3) cluster based on frequencies and modeshapes:
+        cluster = _hierarchical_clustering(
+            freq=freq,
+            Psi=Psi,
+            distance_threshold=distance_threshold,
+            linkage=linkage,
+            modeshape_weight=modeshape_weight,
         )
-        for i in range(cluster.n_clusters_)
-    )
+
+        # 4) rearrange clusters into IndexedModalSets
+        return tuple(
+            IndexedModalSet(
+                all_indices[cluster.labels_ == i],
+                all_freq[cluster.labels_ == i],
+                all_xi[cluster.labels_ == i],
+                all_Psi[cluster.labels_ == i, :],
+            )
+            for i in range(cluster.n_clusters_)
+        )
+    else:
+        # 3) cluster based on frequencies and modeshapes:
+        cluster_labels = _hierarchical_clustering_chunked(
+            freq=freq,
+            Psi=Psi,
+            chunk_size=MAX_CHUNKSIZE_CLUSTERING,
+            distance_threshold=distance_threshold,
+            linkage=linkage,
+            modeshape_weight=modeshape_weight,
+        )
+        clusters_indices = np.unique(cluster_labels)
+
+        # 4) rearrange clusters into IndexedModalSets
+        return tuple(
+            IndexedModalSet(
+                all_indices[cluster_labels == i],
+                all_freq[cluster_labels == i],
+                all_xi[cluster_labels == i],
+                all_Psi[cluster_labels == i, :],
+            )
+            for i in clusters_indices
+        )
 
 
 def single_set_statistics(
@@ -421,6 +1001,7 @@ def filter_clusters(
 
     if notch_filter_bands is None:
         notch_filter_bands = [(0.0, 0.0)]
+
     def _filter_set_(set: IndexedModalSet) -> bool:
         mean_freq, _, mean_MAC, stdev_freq, _, _ = single_set_statistics(set)
         n_modes = set.frequencies.shape[0]
@@ -428,7 +1009,10 @@ def filter_clusters(
             (stdev_freq / mean_freq < max_freq_cov)
             and (mean_MAC > min_MAC)
             and (n_modes >= min_n_modes)
-            and not any(lower_bound <= mean_freq <= upper_bound for lower_bound, upper_bound in notch_filter_bands)
+            and not any(
+                lower_bound <= mean_freq <= upper_bound
+                for lower_bound, upper_bound in notch_filter_bands
+            )
         ):
             return True
         else:
