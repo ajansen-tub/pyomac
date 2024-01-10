@@ -1,52 +1,13 @@
 """Clustering procedures for modes."""
-import time
-
-from typing import List, Sequence, Tuple, Optional, Union, NamedTuple, Callable
+from typing import List, NamedTuple, Optional, Sequence, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
-from sklearn.cluster import AgglomerativeClustering
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from sklearn.cluster import AgglomerativeClustering
 
-MAX_CHUNKSIZE_CLUSTERING = 256
-
-
-class TimerContext:
-    """Timer Context Manager for measuring execution time of code blocks."""
-
-    def __init__(self, message: Optional[str] = None):
-        self.message = message
-
-    def __enter__(self):
-        """Start the timer."""
-        self._tic = time.perf_counter()
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Stop the timer and print the formatted elapsed time."""
-        elapsed_time = time.perf_counter() - self._tic
-        formatted_time = self.format_time(elapsed_time)
-        msg = f"{self.message} - " if self.message else ""
-        color_prefix = ""
-        color_suffix = ""
-
-        print(f"{color_prefix}{msg}Elapsed time: {formatted_time}.{color_suffix}")
-
-        # Re-raise any exception that occurred in the with block
-        if exc_type:
-            raise
-
-    @staticmethod
-    def format_time(seconds):
-        """Format time to display hours, minutes, and seconds as appropriate."""
-        hours, remainder = divmod(seconds, 3600)
-        minutes, seconds = divmod(remainder, 60)
-        if hours:
-            return f"{int(hours)} h {int(minutes)} min"
-        elif minutes:
-            return f"{int(minutes)} min {seconds:0.2f} s"
-        else:
-            return f"{seconds:0.4f} s"
+MAX_CHUNKSIZE_CLUSTERING = 512
 
 
 # Data type definitions:
@@ -320,41 +281,34 @@ def _distance_matrix_memory_efficient(
     assert all_freq.shape[0] == all_Psi.shape[0]
 
     # Precompute norm
-    with TimerContext("Linalg norm"):
-        norm_Psi = np.linalg.norm(all_Psi, axis=1).astype(np.float32)
+    norm_Psi = np.linalg.norm(all_Psi, axis=1).astype(np.float32)
 
     # Convert inputs to float32 if they aren't already
-    with TimerContext("Downcasting"):
-        with np.errstate(under="ignore"):
-            all_freq = all_freq.astype(np.float32)
-            all_Psi = all_Psi.astype(np.float32)
+    all_freq = all_freq.astype(np.float32)
+    all_Psi = all_Psi.astype(np.float32)
 
     # MAC_matrix functionality integrated
-    with TimerContext("MAC"):
-        if np.iscomplexobj(all_Psi):
-            mac_result = np.dot(all_Psi, all_Psi.conj().T).astype(np.float32)
-        elif np.isrealobj(all_Psi):
-            mac_result = np.dot(all_Psi, all_Psi.T).astype(np.float32)
-        else:
-            raise ValueError("Only implemented for complex or real modes")
+    if np.iscomplexobj(all_Psi):
+        mac_result = np.dot(all_Psi, all_Psi.conj().T).astype(np.float32)
+    elif np.isrealobj(all_Psi):
+        mac_result = np.dot(all_Psi, all_Psi.T).astype(np.float32)
+    else:
+        raise ValueError("Only implemented for complex or real modes")
 
-        np.square(np.abs(mac_result, out=mac_result), out=mac_result)
-        mac_result /= norm_Psi[:, np.newaxis]
-        mac_result /= norm_Psi
-        print(f"{mac_result.nbytes=}")
+    np.abs(mac_result, out=mac_result)
+    mac_result /= norm_Psi[:, np.newaxis]
+    mac_result /= norm_Psi
+    np.square(mac_result, out=mac_result)
 
     # Frequency distances calculation
-    with TimerContext("freq diff"):
-        freq_diff = all_freq[:, np.newaxis] - all_freq
-        np.abs(freq_diff, out=freq_diff)
-        np.maximum(all_freq[:, np.newaxis], all_freq, out=all_freq)
-        freq_diff /= all_freq
-        print(f"{freq_diff.nbytes=}")
+    freq_diff = all_freq[:, np.newaxis] - all_freq
+    np.abs(freq_diff, out=freq_diff)
+    max_freq = np.maximum(all_freq[:, np.newaxis], all_freq)
+    freq_diff /= max_freq
 
     # Final distance matrix calculation
-    with TimerContext("distance matrix"):
-        distanceMatrix = freq_diff + modeshape_weight * (1 - mac_result)
-        np.around(distanceMatrix, decimals=10, out=distanceMatrix)
+    distanceMatrix = freq_diff + modeshape_weight * (1 - mac_result)
+    np.around(distanceMatrix, decimals=10, out=distanceMatrix)
     return distanceMatrix
 
 
@@ -394,7 +348,7 @@ def _compute_meta_distance_matrix(
     which should be defined elsewhere in the code and should be compatible with the linkage method used.
     """
     num_clusters = len(aggregated_clusters)
-    meta_distance_matrix = np.zeros((num_clusters, num_clusters), dtype=np.float)
+    meta_distance_matrix = np.zeros((num_clusters, num_clusters), dtype=np.float64)
     for i in range(num_clusters):
         for j in range(i + 1, num_clusters):  # Matrix is symmetric
             dist = _inter_cluster_distance(
@@ -407,6 +361,7 @@ def _compute_meta_distance_matrix(
             )
             meta_distance_matrix[i, j] = dist
             meta_distance_matrix[j, i] = dist
+    return meta_distance_matrix
 
 
 def _inter_cluster_distance(
@@ -486,7 +441,7 @@ def _inter_cluster_distance(
         # For centroid linkage, compute the distance between the centroids of clusters
         mean_f_1 = np.mean(freq_1)
         mean_f_2 = np.mean(freq_2)
-        mac_result = _MAC(Psi_1, Psi_2)
+        mac_result = np.mean(MAC_matrix(Psi_1, Psi_2))
         dist_freq = np.abs(mean_f_1 - mean_f_2) / np.fmax(mean_f_1, mean_f_2)
         return dist_freq + modeshape_weight * (1 - mac_result)
     else:
@@ -524,7 +479,8 @@ def _inter_cluster_distance_matrix(
         A 2-dimensional (n_modes x n_modes) array representing the distance matrix
     """
     # 0) assertions
-    assert freq_1.shape[0] == freq_2.shape[0] == Psi_1.shape[0] == Psi_2.shape[0]
+    assert freq_1.shape[0] == Psi_1.shape[0]
+    assert freq_2.shape[0] == Psi_2.shape[0]
 
     # Convert inputs to float32 if they aren't already
     freq_1 = freq_1.astype(np.float32)
@@ -596,7 +552,10 @@ def _hierarchical_clustering_chunked(
 
 
 def _create_chunks(
-    freq: Sequence[np.ndarray], Psi: Sequence[np.ndarray], chunk_size: int
+    freq: Sequence[np.ndarray],
+    Psi: Sequence[np.ndarray],
+    chunk_size: int,
+    randomize: bool = True,
 ):
     """
     Divide the data into chunks.
@@ -609,6 +568,8 @@ def _create_chunks(
         A sequence of 2D arrays containing modeshapes.
     chunk_size: int
         The maximum size of each chunk.
+    randomize: bool
+        Pick chunks at random
 
     Returns
     -------
@@ -628,9 +589,16 @@ def _create_chunks(
         all_freq.shape[0] == all_Psi.shape[0]
     ), "Mismatch in number of elements between freq and Psi."
 
+    total_samples = all_freq.shape[0]
+
+    # Randomize if required
+    if randomize:
+        rand_indices = np.random.permutation(total_samples)
+        all_freq = all_freq[rand_indices]
+        all_Psi = all_Psi[rand_indices, :]
+
     # Create chunks
     chunks = []
-    total_samples = len(all_freq)
     for start_idx in range(0, total_samples, chunk_size):
         end_idx = min(start_idx + chunk_size, total_samples)
         chunk_freq = all_freq[start_idx:end_idx]
@@ -665,12 +633,14 @@ def _cluster_chunk(chunk, distance_threshold, linkage, modeshape_weight):
     freq_chunk = [freq_chunk]
     Psi_chunk = [Psi_chunk]
 
+    sklearn_linkage = "average" if linkage == "centroid" else linkage
+
     # Apply hierarchical clustering to the chunk
     cluster = _hierarchical_clustering(
         freq=freq_chunk,
         Psi=Psi_chunk,
         distance_threshold=distance_threshold,
-        linkage=linkage,
+        linkage=sklearn_linkage,
         modeshape_weight=modeshape_weight,
     )
 
@@ -683,6 +653,7 @@ def _merge_clusters(
     chunk_clusters,
     linkage: str = "single",
     distance_threshold: float = 0.2,
+    modeshape_weight: float = 1,
 ):
     """
     Merge clusters from different chunks.
@@ -708,15 +679,22 @@ def _merge_clusters(
     aggregated_clusters = _aggregate_cluster_data(chunks, chunk_clusters)
 
     # Compute the meta distance matrix between clusters
-    meta_distance_matrix = _compute_meta_distance_matrix(aggregated_clusters, linkage)
+    meta_distance_matrix = _compute_meta_distance_matrix(
+        aggregated_clusters,
+        linkage=linkage,
+        modeshape_weight=modeshape_weight,
+    )
+
+    sklearn_linkage = "average" if linkage == "centroid" else linkage
 
     # Apply hierarchical clustering to the meta distance matrix
     final_clustering = AgglomerativeClustering(
         affinity="precomputed",
-        linkage=linkage,
+        linkage=sklearn_linkage,
         n_clusters=None,
         distance_threshold=distance_threshold,
     )
+
     final_clustering.fit(meta_distance_matrix)
 
     # Map the cluster labels from final clustering back to the original data points
@@ -787,7 +765,9 @@ def _map_labels_to_original_data(final_labels, chunk_clusters):
     # Iterate over each chunk's cluster labels
     for labels in chunk_clusters:
         # Map each chunk's cluster label to the final cluster label
-        mapped_chunk_labels = [final_labels[cluster_counter + label] for label in labels]
+        mapped_chunk_labels = [
+            final_labels[cluster_counter + label] for label in labels
+        ]
         mapped_labels.extend(mapped_chunk_labels)
 
         # Update the cluster counter by the number of unique clusters in this chunk
