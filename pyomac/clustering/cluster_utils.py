@@ -7,8 +7,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from sklearn.cluster import AgglomerativeClustering
 
-MAX_CHUNKSIZE_CLUSTERING = 512
-
+MAX_CHUNKSIZE_CLUSTERING = 2**15  # a clustering matrix takes 8 GB of memory
 
 # Data type definitions:
 
